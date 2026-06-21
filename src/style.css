@@ -114,6 +114,8 @@ textarea.input { resize:vertical; min-height:96px; }
 .login-panel p { color:#67645e; line-height:1.75; }
 .login-panel .input { background:white; color:#111; border-color:#cfcbc1; }
 .login-panel .btn-primary { background:#111; color:white; border-color:#111; width:100%; margin-top:12px; }
+.google-login { width:100%; margin-top:16px; min-height:54px; background:#fff; color:#171717; border-color:#d4d0c7; font-weight:700; box-shadow:0 1px 2px #00000012; }
+.google-login:hover { border-color:#aaa69d; background:#fafafa; }
 .privacy-note { margin-top:18px; font-size:12px; color:#7c7972; }
 .notice { border:1px solid #ded9ce; background:#e9e5dc; border-radius:12px; padding:14px; font-size:13px; margin:14px 0; }
 .toast { position:fixed; right:22px; bottom:22px; max-width:370px; padding:14px 18px; border-radius:13px; background:#f2efe7; color:#111; z-index:50; box-shadow:0 18px 50px #0009; animation:rise .25s ease; }
@@ -152,4 +154,3 @@ textarea.input { resize:vertical; min-height:96px; }
   .quiz-word { margin-top:20px; }
   .login-art { min-height:38vh; }
 }
-
