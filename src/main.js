@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, getFirestore, orderBy, query, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { icon } from './icons.js';
+import { systemWords } from './systemWords.js';
 import './style.css';
 
 const app = document.querySelector('#app');
@@ -31,7 +32,7 @@ let state = {
   allowed: demoMode,
   words: demoMode ? [...demoWords] : [],
   progress: [], profile: { xp:340, streak:7, last_practice_date:null },
-  view:'home', quiz:[], question:0, answered:false, score:0,
+  view:'home', quiz:[], practicePool:[], quizSource:'personal', question:0, answered:false, score:0,
   authMessage:'',
 };
 
@@ -97,7 +98,7 @@ function renderApp() {
   const email=state.session?.user?.email || '';
   app.innerHTML=`<div class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span>LEXILOOP</div><div class="userbox"><span class="user-email mono" style="font-size:11px;color:var(--muted)">${demoMode?'PREVIEW MODE':escapeHTML(email)}</span><span class="avatar">${escapeHTML(email[0]?.toUpperCase()||'U')}</span><button class="btn btn-quiet icon-btn" id="logout" aria-label="登出">${icon('logout')}</button></div></header><section class="hero"><div><div class="eyebrow">Your vocabulary playground · 2026</div><h1>MAKE WORDS<br><span>STICK.</span></h1></div><p class="hero-note">不是死背，是反覆相遇。建立自己的題庫，用短回合練習，把每個陌生單字慢慢變成熟悉的朋友。</p></section><nav class="nav-tabs"><button class="tab" data-view="home">總覽</button><button class="tab" data-view="practice">開始練習</button><button class="tab" data-view="library">我的題庫</button><button class="tab" data-view="add">新增單字</button></nav><main id="view"></main></div><div class="grain"></div>`;
   document.querySelector('#logout').onclick=()=>demoMode?toast('預覽模式不需登出'):firebaseSignOut(auth);
-  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{state.view=t.dataset.view; if(state.view==='practice') startQuiz(); else renderView();});
+  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{state.view=t.dataset.view;renderView();});
   renderView();
 }
 
@@ -105,6 +106,7 @@ function renderView() {
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===state.view));
   const root=document.querySelector('#view'); if(!root)return;
   if(state.view==='home') renderHome(root);
+  if(state.view==='practice') renderPracticeSelector(root);
   if(state.view==='library') renderLibrary(root);
   if(state.view==='add') renderAdd(root);
 }
@@ -113,7 +115,13 @@ function renderHome(root) {
   const mastered=state.progress.filter(p=>p.mastery>=4).length;
   const percent=state.words.length?Math.round(mastered/state.words.length*100):0;
   root.innerHTML=`<section class="view dashboard-grid"><article class="card stat stat-acid"><div class="eyebrow" style="color:#111">Total words</div><div class="stat-value">${state.words.length}</div><div class="mono" style="font-size:11px">你的私人題庫</div></article><article class="card stat"><div class="eyebrow">Current streak</div><div class="stat-value">${state.profile.streak||0}<small style="font-size:20px">天</small></div><div class="mono" style="font-size:11px;color:var(--orange)">Keep it alive</div></article><article class="card stat stat-orange"><div class="eyebrow" style="color:#111">Total XP</div><div class="stat-value">${state.profile.xp||0}</div><div class="mono" style="font-size:11px">Level ${Math.floor((state.profile.xp||0)/200)+1}</div></article><article class="card stat"><div class="eyebrow">Mastered</div><div class="stat-value">${mastered}</div><div class="mono" style="font-size:11px;color:var(--violet)">${percent}% complete</div></article><article class="card practice-cta"><div><div class="eyebrow">Quick session · 10 words</div><h2>今天也讓大腦<br>熱身一下。</h2></div><div><button class="btn btn-primary" id="home-practice">開始這一回合 ${icon('arrow')}</button></div></article><article class="card progress-card"><div class="eyebrow">Collection mastery</div><div style="position:relative"><div class="ring" style="--p:${percent}"></div><div class="ring-label">${percent}%</div></div><p style="text-align:center;color:var(--muted);font-size:13px">精熟 ${mastered} / ${state.words.length} 個單字</p></article></section>`;
-  document.querySelector('#home-practice').onclick=()=>{state.view='practice';startQuiz();};
+  document.querySelector('#home-practice').onclick=()=>{state.view='practice';renderView();};
+}
+
+function renderPracticeSelector(root) {
+  const mixedCount=new Set([...state.words,...systemWords].map(word=>word.term.toLowerCase())).size;
+  root.innerHTML=`<section class="view"><div class="section-head"><div><div class="eyebrow">Choose your collection</div><h2>選擇練習題庫</h2></div></div><div class="source-grid"><button class="card source-card" data-source="personal"><span class="source-number">${state.words.length}</span><span class="eyebrow">Personal collection</span><strong>我的題庫</strong><span>練習你自行新增與匯入的單字</span></button><button class="card source-card source-system" data-source="system"><span class="source-number">${systemWords.length}</span><span class="eyebrow">Curated collection</span><strong>系統題庫</strong><span>由 Lexiloop 準備的常用英文單字</span></button><button class="card source-card source-mixed" data-source="mixed"><span class="source-number">${mixedCount}</span><span class="eyebrow">All collections</span><strong>混合練習</strong><span>把我的題庫與系統題庫混在一起</span></button></div></section>`;
+  root.querySelectorAll('.source-card').forEach(button=>button.onclick=()=>startQuiz(button.dataset.source));
 }
 
 function renderLibrary(root) {
@@ -154,15 +162,18 @@ async function importCSV(e) {
   status.textContent=`完成！已匯入 ${words.length} 個單字。`; toast(`成功匯入 ${words.length} 個單字`);
 }
 
-function startQuiz() {
+function startQuiz(source=state.quizSource) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view==='practice'));
-  if(state.words.length<4){document.querySelector('#view').innerHTML=`<section class="view empty">至少需要 4 個單字才能開始選擇題練習。<br><button class="btn btn-primary" id="need-add" style="margin-top:18px">新增單字</button></section>`;document.querySelector('#need-add').onclick=()=>{state.view='add';renderView();};return;}
-  state.quiz=shuffle(state.words).slice(0,Math.min(10,state.words.length));state.question=0;state.score=0;state.answered=false;renderQuestion();
+  state.quizSource=source;
+  const sourceWords=source==='system'?systemWords:source==='mixed'?[...state.words,...systemWords]:state.words;
+  state.practicePool=[...new Map(sourceWords.map(word=>[word.term.toLowerCase(),word])).values()];
+  if(state.practicePool.length<4){document.querySelector('#view').innerHTML=`<section class="view empty">我的題庫至少需要 4 個單字才能開始練習。<br><button class="btn btn-primary" id="need-add" style="margin-top:18px">新增單字</button></section>`;document.querySelector('#need-add').onclick=()=>{state.view='add';renderView();};return;}
+  state.quiz=shuffle(state.practicePool).slice(0,Math.min(10,state.practicePool.length));state.question=0;state.score=0;state.answered=false;renderQuestion();
 }
 
 function renderQuestion() {
   const root=document.querySelector('#view'); if(state.question>=state.quiz.length)return finishQuiz(); const word=state.quiz[state.question];
-  const distractors=shuffle(state.words.filter(w=>w.id!==word.id)).slice(0,3).map(w=>w.definition); const options=shuffle([word.definition,...distractors]);
+  const distractors=shuffle(state.practicePool.filter(w=>w.id!==word.id&&w.definition!==word.definition)).slice(0,3).map(w=>w.definition); const options=shuffle([word.definition,...distractors]);
   root.innerHTML=`<section class="view quiz-wrap"><div class="quiz-top"><span class="mono" style="font-size:11px;color:var(--muted)">${state.question+1} / ${state.quiz.length}</span><div class="quiz-progress"><span style="width:${(state.question/state.quiz.length)*100}%"></span></div><span class="mono" style="font-size:11px;color:var(--acid)">${state.score} XP</span></div><article class="card quiz-card"><div class="eyebrow">Choose the meaning</div><div style="display:flex;align-items:center;gap:14px"><div class="quiz-word">${escapeHTML(word.term)}</div><button class="btn icon-btn" id="quiz-speak" aria-label="播放發音">${icon('volume')}</button></div><div class="quiz-example">${escapeHTML(word.example||'選出最接近的中文解釋')}</div><div class="options">${options.map((o,i)=>`<button class="option" data-value="${escapeHTML(o)}"><span class="mono" style="font-size:10px;color:var(--muted)">0${i+1}</span><br>${escapeHTML(o)}</button>`).join('')}</div><div class="feedback"></div></article></section>`;
   document.querySelector('#quiz-speak').onclick=()=>speak(word.term); document.querySelectorAll('.option').forEach(b=>b.onclick=()=>answer(b,word));
 }
@@ -179,7 +190,7 @@ async function finishQuiz() {
   state.profile.xp=(state.profile.xp||0)+state.score; const today=new Date().toISOString().slice(0,10),last=state.profile.last_practice_date;
   if(last!==today){const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10);state.profile.streak=last===yesterday?(state.profile.streak||0)+1:1;state.profile.last_practice_date=today;}
   if(!demoMode)await setDoc(doc(db,'users',state.session.user.id,'profile','stats'),{xp:state.profile.xp,streak:state.profile.streak,last_practice_date:state.profile.last_practice_date},{merge:true});
-  document.querySelector('#view').innerHTML=`<section class="view quiz-wrap"><article class="card" style="text-align:center;padding:70px 24px"><div class="eyebrow">Session complete</div><div style="font-size:clamp(75px,16vw,150px);font-weight:900;letter-spacing:-.09em;color:var(--acid);line-height:1;margin:22px 0">+${state.score}</div><h2 style="font-size:34px;margin:0 0 10px">這回合完成了。</h2><p style="color:var(--muted)">答對 ${state.score/10} / ${state.quiz.length} 題，明天再讓這些單字回來一次。</p><button class="btn btn-primary" id="again" style="margin-top:18px">再玩一回合 ${icon('arrow')}</button></article></section>`;document.querySelector('#again').onclick=startQuiz;
+  document.querySelector('#view').innerHTML=`<section class="view quiz-wrap"><article class="card" style="text-align:center;padding:70px 24px"><div class="eyebrow">Session complete</div><div style="font-size:clamp(75px,16vw,150px);font-weight:900;letter-spacing:-.09em;color:var(--acid);line-height:1;margin:22px 0">+${state.score}</div><h2 style="font-size:34px;margin:0 0 10px">這回合完成了。</h2><p style="color:var(--muted)">答對 ${state.score/10} / ${state.quiz.length} 題，明天再讓這些單字回來一次。</p><button class="btn btn-primary" id="again" style="margin-top:18px">再玩一回合 ${icon('arrow')}</button><button class="btn" id="change-source" style="margin:18px 0 0 8px">更換題庫</button></article></section>`;document.querySelector('#again').onclick=()=>startQuiz(state.quizSource);document.querySelector('#change-source').onclick=()=>{state.view='practice';renderView();};
 }
 
 bootstrap();
