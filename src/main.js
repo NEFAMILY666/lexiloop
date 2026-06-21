@@ -1,15 +1,21 @@
-import { createClient } from '@supabase/supabase-js';
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, getFirestore, orderBy, query, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { icon } from './icons.js';
 import './style.css';
 
 const app = document.querySelector('#app');
 const config = {
-  url: import.meta.env.VITE_SUPABASE_URL,
-  key: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
-const configured = Boolean(config.url && config.key && !config.url.includes('YOUR_PROJECT'));
+const configured = Object.values(config).every(Boolean) && !config.projectId?.includes('YOUR_PROJECT');
 const demoMode = !configured && ['localhost', '127.0.0.1'].includes(location.hostname);
-const supabase = configured ? createClient(config.url, config.key) : null;
+const firebaseApp = configured ? initializeApp(config) : null;
+const auth = firebaseApp ? getAuth(firebaseApp) : null;
+const db = firebaseApp ? getFirestore(firebaseApp) : null;
 
 const demoWords = [
   { id:'1', term:'serendipity', definition:'意外發現美好事物的機緣', example:'Finding this quiet café was pure serendipity.', part_of_speech:'noun', level:'B2' },
@@ -26,6 +32,7 @@ let state = {
   words: demoMode ? [...demoWords] : [],
   progress: [], profile: { xp:340, streak:7, last_practice_date:null },
   view:'home', quiz:[], question:0, answered:false, score:0,
+  authMessage:'',
 };
 
 const escapeHTML = (s='') => String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -43,41 +50,53 @@ function speak(text) {
 async function bootstrap() {
   if (demoMode) return renderApp();
   if (!configured) return renderSetup();
-  const { data:{ session } } = await supabase.auth.getSession();
-  state.session = session;
-  supabase.auth.onAuthStateChange((_event, session) => { state.session=session; session ? verifyAndLoad() : renderLogin(); });
-  session ? await verifyAndLoad() : renderLogin();
+  onAuthStateChanged(auth, async user => {
+    if (user) {
+      state.session={user:{email:user.email,id:user.uid}};
+      await verifyAndLoad(user);
+    } else {
+      state.session=null;
+      const message=state.authMessage; state.authMessage='';
+      renderLogin(message);
+    }
+  });
 }
 
-async function verifyAndLoad() {
-  const { data:allowed, error } = await supabase.rpc('is_allowed');
-  if (error || !allowed) {
-    state.allowed=false; await supabase.auth.signOut(); renderLogin('這個帳號不在使用白名單中。'); return;
+async function verifyAndLoad(user) {
+  try {
+    const wordsRef=collection(db,'users',user.uid,'words');
+    const progressRef=collection(db,'users',user.uid,'progress');
+    const profileRef=doc(db,'users',user.uid,'profile','stats');
+    const [wordsSnap,progressSnap,profileSnap]=await Promise.all([
+      getDocs(query(wordsRef,orderBy('createdAt','desc'))), getDocs(progressRef), getDoc(profileRef)
+    ]);
+    state.allowed=true;
+    state.words=wordsSnap.docs.map(item=>({id:item.id,...item.data()}));
+    state.progress=progressSnap.docs.map(item=>({id:item.id,...item.data()}));
+    state.profile=profileSnap.exists()?profileSnap.data():{xp:0,streak:0,last_practice_date:null};
+    if (!state.words.length) state.view='add';
+    renderApp();
+  } catch (error) {
+    console.error(error);
+    state.allowed=false;
+    state.authMessage=error?.code==='permission-denied'?'這個 Google 帳號不在使用白名單中。':'目前無法讀取題庫，請稍後再試。';
+    await firebaseSignOut(auth);
   }
-  state.allowed=true;
-  const [{ data:words }, { data:progress }, { data:profile }] = await Promise.all([
-    supabase.from('words').select('*').order('created_at',{ascending:false}),
-    supabase.from('word_progress').select('*'),
-    supabase.from('profiles').select('*').maybeSingle(),
-  ]);
-  state.words=words || []; state.progress=progress || []; state.profile=profile || {xp:0,streak:0};
-  if (!state.words.length) state.view='add';
-  renderApp();
 }
 
 function renderSetup() {
-  app.innerHTML=`<div class="login"><section class="login-art"><div class="brand"><span class="brand-mark">LL</span>LEXILOOP</div><h1>WORDS<br><span>IN PLAY.</span></h1><div class="orbit"></div></section><section class="login-panel"><div class="eyebrow">One-time setup</div><h2>差最後一步，<br>就能開始。</h2><p>網站已完成，但尚未連接私人題庫。請依 README 建立 Supabase，並在 GitHub 設定兩個部署密鑰。</p><div class="notice">你的白名單信箱與單字資料只會存在後端，不會寫入公開前端。</div></section></div><div class="grain"></div>`;
+  app.innerHTML=`<div class="login"><section class="login-art"><div class="brand"><span class="brand-mark">LL</span>LEXILOOP</div><h1>WORDS<br><span>IN PLAY.</span></h1><div class="orbit"></div></section><section class="login-panel"><div class="eyebrow">One-time setup</div><h2>差最後一步，<br>就能開始。</h2><p>網站已完成，但尚未連接 Firebase。請依 README 建立 Firebase 專案，並在 GitHub 設定四個部署密鑰。</p><div class="notice">你的白名單信箱與單字資料只會存在 Firebase 後端，不會寫入公開前端。</div></section></div><div class="grain"></div>`;
 }
 
 function renderLogin(message='') {
   app.innerHTML=`<div class="login"><section class="login-art"><div class="brand"><span class="brand-mark">LL</span>LEXILOOP</div><h1>WORDS<br><span>IN PLAY.</span></h1><div class="orbit"></div></section><section class="login-panel"><div class="eyebrow">Private vocabulary space</div><h2>登入，開始<br>建立你的題庫。</h2><p>使用已加入白名單的 Google 帳戶繼續。登入後即可新增單字、匯入題庫並開始練習。</p>${message?`<div class="notice">${escapeHTML(message)}</div>`:''}<button class="btn google-login" id="google-login">${googleLogo}<span>使用 Google 帳戶繼續</span></button><div class="privacy-note">登入資格由伺服器端白名單驗證，核准信箱不會出現在公開前端。</div></section></div><div class="grain"></div>`;
-  document.querySelector('#google-login').onclick=async e=>{const btn=e.currentTarget;btn.disabled=true;btn.querySelector('span').textContent='正在前往 Google…';const {error}=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});if(error){toast(error.message,true);btn.disabled=false;btn.querySelector('span').textContent='使用 Google 帳戶繼續';}};
+  document.querySelector('#google-login').onclick=async e=>{const btn=e.currentTarget;btn.disabled=true;btn.querySelector('span').textContent='正在開啟 Google…';try{const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});await signInWithPopup(auth,provider);}catch(error){if(error?.code!=='auth/popup-closed-by-user')toast('Google 登入失敗，請稍後再試。',true);btn.disabled=false;btn.querySelector('span').textContent='使用 Google 帳戶繼續';}};
 }
 
 function renderApp() {
   const email=state.session?.user?.email || '';
   app.innerHTML=`<div class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span>LEXILOOP</div><div class="userbox"><span class="user-email mono" style="font-size:11px;color:var(--muted)">${demoMode?'PREVIEW MODE':escapeHTML(email)}</span><span class="avatar">${escapeHTML(email[0]?.toUpperCase()||'U')}</span><button class="btn btn-quiet icon-btn" id="logout" aria-label="登出">${icon('logout')}</button></div></header><section class="hero"><div><div class="eyebrow">Your vocabulary playground · 2026</div><h1>MAKE WORDS<br><span>STICK.</span></h1></div><p class="hero-note">不是死背，是反覆相遇。建立自己的題庫，用短回合練習，把每個陌生單字慢慢變成熟悉的朋友。</p></section><nav class="nav-tabs"><button class="tab" data-view="home">總覽</button><button class="tab" data-view="practice">開始練習</button><button class="tab" data-view="library">我的題庫</button><button class="tab" data-view="add">新增單字</button></nav><main id="view"></main></div><div class="grain"></div>`;
-  document.querySelector('#logout').onclick=()=>demoMode?toast('預覽模式不需登出'):supabase.auth.signOut();
+  document.querySelector('#logout').onclick=()=>demoMode?toast('預覽模式不需登出'):firebaseSignOut(auth);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{state.view=t.dataset.view; if(state.view==='practice') startQuiz(); else renderView();});
   renderView();
 }
@@ -105,7 +124,7 @@ function renderLibrary(root) {
 
 async function deleteWord(id) {
   if(!confirm('確定要刪除這個單字嗎？'))return;
-  if(!demoMode){const {error}=await supabase.from('words').delete().eq('id',id);if(error)return toast(error.message,true);}
+  if(!demoMode){try{await deleteDoc(doc(db,'users',state.session.user.id,'words',id));}catch(error){return toast('刪除失敗，請稍後再試。',true);}}
   state.words=state.words.filter(w=>String(w.id)!==String(id));renderLibrary(document.querySelector('#view'));toast('單字已刪除');
 }
 
@@ -118,7 +137,7 @@ function renderAdd(root) {
 
 async function addWord(e) {
   e.preventDefault(); const data=Object.fromEntries(new FormData(e.currentTarget));
-  if(demoMode){data.id=crypto.randomUUID();state.words.unshift(data);} else {const {data:row,error}=await supabase.from('words').insert(data).select().single();if(error)return toast(error.message,true);state.words.unshift(row);}
+  if(demoMode){data.id=crypto.randomUUID();state.words.unshift(data);} else {try{const ref=await addDoc(collection(db,'users',state.session.user.id,'words'),{...data,createdAt:serverTimestamp()});data.id=ref.id;state.words.unshift(data);}catch(error){return toast('新增失敗，請稍後再試。',true);}}
   e.currentTarget.reset(); toast(`已加入 ${data.term}`);
 }
 
@@ -131,7 +150,7 @@ function parseCSV(text) {
 async function importCSV(e) {
   const file=e.target.files[0]; if(!file)return; const words=parseCSV(await file.text()); const status=document.querySelector('#import-status');
   if(!words.length)return status.textContent='沒有找到可匯入的資料，請檢查 CSV 格式。';
-  if(demoMode){words.forEach(w=>w.id=crypto.randomUUID());state.words.unshift(...words);} else {const {data,error}=await supabase.from('words').insert(words).select();if(error)return toast(error.message,true);state.words.unshift(...data);}
+  if(demoMode){words.forEach(w=>w.id=crypto.randomUUID());state.words.unshift(...words);} else {try{const saved=[];for(let offset=0;offset<words.length;offset+=400){const batch=writeBatch(db);for(const word of words.slice(offset,offset+400)){const ref=doc(collection(db,'users',state.session.user.id,'words'));batch.set(ref,{...word,createdAt:serverTimestamp()});saved.push({...word,id:ref.id});}await batch.commit();}state.words.unshift(...saved);}catch(error){return toast('匯入失敗，請稍後再試。',true);}}
   status.textContent=`完成！已匯入 ${words.length} 個單字。`; toast(`成功匯入 ${words.length} 個單字`);
 }
 
@@ -152,14 +171,14 @@ async function answer(button,word) {
   if(state.answered)return; state.answered=true; const correct=button.dataset.value===word.definition; if(correct)state.score+=10;
   document.querySelectorAll('.option').forEach(b=>{b.disabled=true;if(b.dataset.value===word.definition)b.classList.add('correct');}); if(!correct)button.classList.add('wrong');
   document.querySelector('.feedback').textContent=correct?'漂亮！+10 XP':'差一點，正確答案已標示。';
-  if(!demoMode){const existing=state.progress.find(p=>p.word_id===word.id);const payload={user_id:state.session.user.id,word_id:word.id,mastery:Math.max(0,Math.min(5,(existing?.mastery||0)+(correct?1:-1))),correct_count:(existing?.correct_count||0)+(correct?1:0),wrong_count:(existing?.wrong_count||0)+(correct?0:1),last_practiced_at:new Date().toISOString()};await supabase.from('word_progress').upsert(payload);existing?Object.assign(existing,payload):state.progress.push(payload);}
+  if(!demoMode){const existing=state.progress.find(p=>p.word_id===word.id);const payload={word_id:word.id,mastery:Math.max(0,Math.min(5,(existing?.mastery||0)+(correct?1:-1))),correct_count:(existing?.correct_count||0)+(correct?1:0),wrong_count:(existing?.wrong_count||0)+(correct?0:1),last_practiced_at:new Date().toISOString()};try{await setDoc(doc(db,'users',state.session.user.id,'progress',word.id),payload,{merge:true});existing?Object.assign(existing,payload):state.progress.push(payload);}catch(error){console.error(error);}}
   setTimeout(()=>{state.question++;state.answered=false;renderQuestion();},1000);
 }
 
 async function finishQuiz() {
   state.profile.xp=(state.profile.xp||0)+state.score; const today=new Date().toISOString().slice(0,10),last=state.profile.last_practice_date;
   if(last!==today){const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10);state.profile.streak=last===yesterday?(state.profile.streak||0)+1:1;state.profile.last_practice_date=today;}
-  if(!demoMode)await supabase.from('profiles').upsert({user_id:state.session.user.id,xp:state.profile.xp,streak:state.profile.streak,last_practice_date:state.profile.last_practice_date});
+  if(!demoMode)await setDoc(doc(db,'users',state.session.user.id,'profile','stats'),{xp:state.profile.xp,streak:state.profile.streak,last_practice_date:state.profile.last_practice_date},{merge:true});
   document.querySelector('#view').innerHTML=`<section class="view quiz-wrap"><article class="card" style="text-align:center;padding:70px 24px"><div class="eyebrow">Session complete</div><div style="font-size:clamp(75px,16vw,150px);font-weight:900;letter-spacing:-.09em;color:var(--acid);line-height:1;margin:22px 0">+${state.score}</div><h2 style="font-size:34px;margin:0 0 10px">這回合完成了。</h2><p style="color:var(--muted)">答對 ${state.score/10} / ${state.quiz.length} 題，明天再讓這些單字回來一次。</p><button class="btn btn-primary" id="again" style="margin-top:18px">再玩一回合 ${icon('arrow')}</button></article></section>`;document.querySelector('#again').onclick=startQuiz;
 }
 

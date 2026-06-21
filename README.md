@@ -1,26 +1,42 @@
 # Lexiloop
 
-私人、遊戲化的單字練習網站。支援單筆新增、CSV 批次匯入、瀏覽器英文發音、選擇題、XP、連勝與錯題熟練度。
+私人、遊戲化的單字練習網站。支援 Google 登入、單筆新增、CSV 批次匯入、英文發音、選擇題、XP、連勝與熟練度。
 
-## 第一次設定
+## Firebase 第一次設定
 
-### 1. 建立 Supabase 題庫
+### 1. 建立專案與網頁應用程式
 
-1. 在 [Supabase](https://supabase.com/) 建立免費專案。
-2. 到 **SQL Editor**，貼上並執行 [`supabase/schema.sql`](supabase/schema.sql)。
-3. 在 **Table Editor → allowed_users** 新增一列，把自己的登入信箱填入 `email`。信箱只存在資料庫，不會出現在前端或 GitHub。
-4. 到 **Authentication → Providers → Google** 啟用 Google 登入，填入 Google Cloud OAuth Client ID 與 Client Secret。
-5. Google OAuth 的 Authorized redirect URI 使用 Supabase 顯示的 callback URL：`https://YOUR_PROJECT.supabase.co/auth/v1/callback`。
-6. 到 **Authentication → URL Configuration**，將 GitHub Pages 網址设為 Site URL，並加到 Redirect URLs。
+1. 在 [Firebase Console](https://console.firebase.google.com/) 建立專案。
+2. 在專案首頁點選 **Web（`</>`）** 新增網頁應用程式，不需要啟用 Firebase Hosting。
+3. 保留畫面上的 `firebaseConfig`，稍後會把其中四個值加入 GitHub Secrets。
 
-### 2. 設定 GitHub Pages
+### 2. 啟用 Google 登入
 
-在 GitHub 專案的 **Settings → Secrets and variables → Actions** 新增：
+1. 開啟 **Build → Authentication → Get started**。
+2. 在 **Sign-in method** 選擇 **Google**，啟用並選擇支援信箱後儲存。
+3. 到 Authentication 的 **Settings → Authorized domains**，加入 `nefamily666.github.io`。
 
-- `VITE_SUPABASE_URL`：Supabase Project URL
-- `VITE_SUPABASE_ANON_KEY`：Supabase 的 publishable/anon key
+### 3. 建立 Firestore 與安全規則
 
-再到 **Settings → Pages → Build and deployment**，Source 選擇 **GitHub Actions**。推送到 `main` 後會自動部署。
+1. 開啟 **Build → Firestore Database → Create database**，選擇 Production mode。
+2. 到 **Rules**，用 [`firebase/firestore.rules`](firebase/firestore.rules) 的完整內容取代預設規則並按 **Publish**。
+3. 到 **Data** 建立 collection：`allowed_emails`。
+4. 每個獲准信箱建立一個 document，**Document ID 直接填該信箱**；加入任意欄位，例如 `active`（boolean）=`true` 後儲存。
+
+白名單信箱只存在 Firestore，安全規則禁止前端讀取或列出白名單。每位使用者也只能存取自己的題庫。
+
+### 4. 設定 GitHub Actions Secrets
+
+到 GitHub 專案的 **Settings → Secrets and variables → Actions** 建立：
+
+| Secret 名稱 | firebaseConfig 對應值 |
+| --- | --- |
+| `VITE_FIREBASE_API_KEY` | `apiKey` |
+| `VITE_FIREBASE_AUTH_DOMAIN` | `authDomain` |
+| `VITE_FIREBASE_PROJECT_ID` | `projectId` |
+| `VITE_FIREBASE_APP_ID` | `appId` |
+
+Firebase Web API key 會存在編譯後的網頁中；真正的資料保護由 Authentication 與 Firestore Security Rules 負責。
 
 ## 匯入格式
 
@@ -34,8 +50,8 @@ serendipity,意外發現美好事物的機緣,Finding this café was pure serend
 ## 本機預覽
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
-本機未設定 Supabase 時會自動載入示範題庫，方便預覽所有互動。
+本機未設定 Firebase 時會自動載入示範題庫，方便預覽所有互動。
