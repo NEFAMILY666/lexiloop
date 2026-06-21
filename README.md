@@ -1,31 +1,41 @@
 # Lexiloop
 
-蝘犖???脣??摮毀蝧雯蝡?游蝑憓SV ?寞活?臬?汗?刻??喋???P????憿?蝺游漲??
-## 蝚砌?甈∟身摰?
-### 1. 撱箇? Supabase 憿澈
+私人、遊戲化的單字練習網站。支援單筆新增、CSV 批次匯入、瀏覽器英文發音、選擇題、XP、連勝與錯題熟練度。
 
-1. ??[Supabase](https://supabase.com/) 撱箇??祥撠???2. ??**SQL Editor**嚗票銝蒂?瑁? [`supabase/schema.sql`](supabase/schema.sql)??3. ??**Table Editor ??allowed_users** ?啣?銝???撌梁??餃靽∠拳憛怠 `email`?縑蝞勗摮鞈?摨恬?銝??箇?典?蝡舀? GitHub??4. ??**Authentication ??Providers ??Google** ? Google ?餃嚗‵??Google Cloud OAuth Client ID ??Client Secret??5. Google OAuth ??Authorized redirect URI 雿輻 Supabase 憿舐內??callback URL嚗https://YOUR_PROJECT.supabase.co/auth/v1/callback`??6. ??**Authentication ??URL Configuration**嚗? GitHub Pages 蝬脣?霈曄 Site URL嚗蒂? Redirect URLs??
-### 2. 閮剖? GitHub Pages
+## 第一次設定
 
-??GitHub 撠???**Settings ??Secrets and variables ??Actions** ?啣?嚗?
-- `VITE_SUPABASE_URL`嚗upabase Project URL
-- `VITE_SUPABASE_ANON_KEY`嚗upabase ??publishable/anon key
+### 1. 建立 Supabase 題庫
 
-? **Settings ??Pages ??Build and deployment**嚗ource ?豢? **GitHub Actions**?? `main` 敺??芸??函蔡??
-## ?臬?澆?
+1. 在 [Supabase](https://supabase.com/) 建立免費專案。
+2. 到 **SQL Editor**，貼上並執行 [`supabase/schema.sql`](supabase/schema.sql)。
+3. 在 **Table Editor → allowed_users** 新增一列，把自己的登入信箱填入 `email`。信箱只存在資料庫，不會出現在前端或 GitHub。
+4. 到 **Authentication → Providers → Google** 啟用 Google 登入，填入 Google Cloud OAuth Client ID 與 Client Secret。
+5. Google OAuth 的 Authorized redirect URI 使用 Supabase 顯示的 callback URL：`https://YOUR_PROJECT.supabase.co/auth/v1/callback`。
+6. 到 **Authentication → URL Configuration**，將 GitHub Pages 網址设為 Site URL，並加到 Redirect URLs。
 
-CSV 蝚砌??隞交璅?嚗?雿?摨?銝?
+### 2. 設定 GitHub Pages
+
+在 GitHub 專案的 **Settings → Secrets and variables → Actions** 新增：
+
+- `VITE_SUPABASE_URL`：Supabase Project URL
+- `VITE_SUPABASE_ANON_KEY`：Supabase 的 publishable/anon key
+
+再到 **Settings → Pages → Build and deployment**，Source 選擇 **GitHub Actions**。推送到 `main` 後會自動部署。
+
+## 匯入格式
+
+CSV 第一列可以是標題，欄位順序如下：
 
 ```csv
 term,definition,example,part_of_speech,level
-serendipity,???潛蝢末鈭??蝺?Finding this caf矇 was pure serendipity.,noun,B2
+serendipity,意外發現美好事物的機緣,Finding this café was pure serendipity.,noun,B2
 ```
 
-## ?祆??汗
+## 本機預覽
 
 ```bash
 npm install
 npm run dev
 ```
 
-?祆??芾身摰?Supabase ???芸?頛蝷箇?憿澈嚗靘輸?閬賣?????
+本機未設定 Supabase 時會自動載入示範題庫，方便預覽所有互動。
